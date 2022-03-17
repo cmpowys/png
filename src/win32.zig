@@ -1,9 +1,8 @@
 const std = @import("std");
+const win32_error = @import("./win32_error.zig");
 
-pub const Error = error{WindowsError}; // TODO need to map between a custom error type and a win32 error code
 pub const InstanceHandle = *opaque {};
 pub const WindowHandle = *opaque{};
-pub const Win32ErrorCode = std.os.windows.Win32Error;
 pub const winapi_calling_conv = std.os.windows.WINAPI;
 pub const WindowsResult = isize;
 
@@ -16,27 +15,11 @@ pub const WindowsProcedure = fn(
 ) callconv(winapi_calling_conv) isize;
 
 pub fn getModuleHandleA(module_name: ?[*:0]const u8) !InstanceHandle {
-    return GetModuleHandleA(module_name) orelse Error.WindowsError;
+    return GetModuleHandleA(module_name) orelse win32_error.getErrorFromCode(getLastError());
 }
 
-pub fn getLastError() Win32ErrorCode {
-    return @intToEnum(Win32ErrorCode, GetLastError()); // TODO how do I handle an error value not represented by the std lib Enum?
-}
-
-pub fn getErrorMessage(errorCode: Win32ErrorCode, allocator: *std.mem.Allocator) ![]u8 {
-    const message_from_system_flag = 0x00001000;
-
-    const bufferSize = 512;
-    var buffer = try allocator.allocSentinel(u8, bufferSize, 0);
-    errdefer allocator.free(buffer);
-
-    var messageLength = FormatMessageA(message_from_system_flag,null, errorCode, 0, buffer.ptr, bufferSize, null);
-   
-    if (messageLength == 0){
-        return Error.WindowsError;
-    }
-
-    return buffer[0..messageLength];
+pub fn getLastError() win32_error.Win32ErrorCode {
+    return @intToEnum(win32_error.Win32ErrorCode, GetLastError()); // TODO how do I handle an error value not represented by the std lib Enum?
 }
 
 pub fn createWindow(instance: InstanceHandle, windProc: WindowsProcedure, width: i32, height: i32, title: [*:0]const u8) !WindowHandle {
@@ -56,12 +39,12 @@ pub fn createWindow(instance: InstanceHandle, windProc: WindowsProcedure, width:
         .hCursor = null,
         .hbrBackground = null,
         .lpszMenuName = "",
-        .lpszClassName = className,
+        .lpszClassName = className,  
         .hIconSm = null
     };
 
     if (RegisterClassExA(&wc) == 0){
-        return Error.WindowsError;
+        return win32_error.getErrorFromCode(getLastError());
     }
     errdefer { // TODO issue with error reporting system because error code can be cleared when any cleanup code like this gets called into win32 API
         _ = UnregisterClassA(className, instance);
@@ -89,7 +72,7 @@ pub fn createWindow(instance: InstanceHandle, windProc: WindowsProcedure, width:
         null,
         null,
         instance,
-        null) orelse return Error.WindowsError;
+        null) orelse return win32_error.getErrorFromCode(getLastError());
     // TODO errdefer destroy window
     // TODO resize window to get exact client area
 
@@ -137,7 +120,7 @@ extern "KERNEL32" fn GetLastError() callconv(winapi_calling_conv) DWORD;
 extern "KERNEL32" fn FormatMessageA(
     dwFlags: DWORD,
     lpSource: ?*const anyopaque,
-    dwMessageId: Win32ErrorCode,
+    dwMessageId: win32_error.Win32ErrorCode,
     dwLanguageId: u32,
     lpBuffer: ?[*:0]u8,
     nSize: u32,
