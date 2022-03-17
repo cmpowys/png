@@ -39,7 +39,7 @@ pub fn createWindow(instance: InstanceHandle, windProc: WindowsProcedure, width:
         .hCursor = null,
         .hbrBackground = null,
         .lpszMenuName = "",
-        .lpszClassName = className,  
+        .lpszClassName = className,   
         .hIconSm = null
     };
 
