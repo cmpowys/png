@@ -14,6 +14,8 @@ pub fn main() !void {
     @memset(graphicsBuffer.buffer.ptr, 0xA2, graphicsBuffer.width * graphicsBuffer.height * 4);
     defer allocator.free(graphicsBuffer.buffer);
 
+    try updateWindow();
+
     win32.showWindow(window);
 
     while (running) {
@@ -22,7 +24,6 @@ pub fn main() !void {
             win32.translateMessage(&msg);
             win32.dispatchMessage(&msg);
         }
-        try win32.blitToWindow(window, graphicsBuffer.buffer, graphicsBuffer.width, graphicsBuffer.height);
     }
 }
 
@@ -38,7 +39,7 @@ fn windowsProcedure(
 ) callconv(win32.WINAPI) win32.LRESULT {
     switch (message) {
         win32.WM_PAINT => {
-            var paint : win32.PAINTSTRUCT = undefined;
+            var paint: win32.PAINTSTRUCT = undefined;
             win32.beginPaint(window, &paint);
             updateWindow() catch {};
             win32.endPaint(window, &paint);
