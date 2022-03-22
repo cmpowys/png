@@ -1,22 +1,29 @@
 const std = @import("std");
-const win32 = @import("./win32.zig");
+const win32 = @import("./win32_wrapper.zig");
 
 pub fn main() !void {
-    const instance = try getWindowsInstance();
-    const window = try win32.createWindow(instance, windowsProcedure, 400, 400, "PNG Viewer");
+    const instance = try win32.getCurrentInstance();
+    const window = try win32.createWindow(600, 600, "Test Window", windowsProcedure, instance);
     win32.showWindow(window);
-    while (true) {}
-}
 
-fn getWindowsInstance() !win32.InstanceHandle {
-    return try win32.getModuleHandleA(null);
+    while (true) {
+        var msg: win32.MSG = undefined;
+        while (win32.peekMessage(&msg)) {
+            win32.translateMessage(&msg);
+            win32.dispatchMessage(&msg);
+        }
+    }
 }
 
 fn windowsProcedure(
-    window: win32.WindowHandle,
+    windowHandle: win32.HWND,
     message: u32,
-    wParam: usize,
-    lParam: isize,
-) callconv(win32.winapi_calling_conv) isize {
-    return win32.defaultWindowsProcedure(window, message, wParam, lParam);
+    wParam: win32.WPARAM,
+    lParam: win32.LPARAM,
+) callconv(win32.WINAPI) win32.LRESULT {
+    switch (message) {
+        else => {
+            return win32.defaultWindowProcedure(windowHandle, message, wParam, lParam);
+        },
+    }
 }
