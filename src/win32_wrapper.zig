@@ -10,10 +10,21 @@ pub const WINAPI = std.os.windows.WINAPI;
 pub const LRESULT = win32.LPARAM;
 pub const HINSTANCE = win32.HINSTANCE;
 pub const MSG = win32.MSG;
+pub const HDC = win32.HDC;
+pub const PAINTSTRUCT = win32.PAINTSTRUCT;
 
 pub const WM_CLOSE = win32.WM_CLOSE;
+pub const WM_PAINT = win32.WM_PAINT;
 
 pub const defaultWindowProcedure = win32.DefWindowProcW;
+
+pub fn beginPaint(window: HWND, paint: *win32.PAINTSTRUCT) void {
+    _ = win32.EndPaint(window, paint);
+}
+
+pub fn endPaint(window: HWND, paint: *win32.PAINTSTRUCT) void {
+    _ = win32.BeginPaint(window, paint);
+}
 
 pub fn getCurrentInstance() !win32.HINSTANCE {
     return win32.GetModuleHandleW(null) orelse printAndReturnError("Getting current instance");
@@ -66,6 +77,32 @@ fn getClientDimensions(window: HWND) !Dimensions {
         .width = rect.right - rect.left,
         .height = rect.bottom - rect.top,
     };
+}
+
+pub fn blitToWindow(window: HWND, buffer: []u8, bufferWidth: u64, bufferHeight: u64) !void {
+    const clientDimensions = try getClientDimensions(window);
+    const deviceContext = try getDeviceContext(window);
+    const bitmapInfo = win32.BITMAPINFO{ .bmiHeader = win32.BITMAPINFOHEADER{
+        .biSize = @sizeOf(win32.BITMAPINFOHEADER),
+        .biWidth = @intCast(i32, bufferWidth),
+        .biHeight = @intCast(i32, bufferHeight),
+        .biPlanes = 1,
+        .biBitCount = 32,
+        .biCompression = win32.BI_RGB,
+        .biSizeImage = 0,
+        .biXPelsPerMeter = 0,
+        .biYPelsPerMeter = 0,
+        .biClrUsed = 0,
+        .biClrImportant = 0,
+    }, .bmiColors = undefined };
+
+    if (win32.StretchDIBits(deviceContext, 0, 0, @intCast(i32, clientDimensions.width), @intCast(i32, clientDimensions.height), 0, 0, @intCast(i32, bufferWidth), @intCast(i32, bufferHeight), buffer.ptr, &bitmapInfo, win32.DIB_RGB_COLORS, win32.SRCCOPY) == 0) {
+        return printAndReturnError("Blitting graphics buffer to window");
+    }
+}
+
+pub fn getDeviceContext(window: HWND) !HDC {
+    return win32.GetDC(window) orelse return printAndReturnError("Getting window device context");
 }
 
 pub fn resizeWindowExactly(window: HWND, desiredWidth: u16, desiredHeight: u16) !void {
