@@ -41,7 +41,12 @@ pub fn createWindow(clientWidth: u16, clientHeight: u16, comptime windowTitle: [
 
     const window = win32.CreateWindowExW(win32.WINDOW_EX_STYLE.CLIENTEDGE, windowTitleW, windowTitleW, win32.WINDOW_STYLE.TILEDWINDOW, win32.CW_USEDEFAULT, win32.CW_USEDEFAULT, @intCast(i32, clientWidth), @intCast(i32, clientHeight), null, null, instance, null) orelse return printAndReturnError("Creating window");
 
-    try resizeWindowExactly(window, clientWidth, clientHeight);
+    resizeWindowExactly(window, clientWidth, clientHeight) catch |err| {
+        if (win32.DestroyWindow(window) == 0){
+            std.log.err("Unable to destroy window after an error was raised trying to resize it.", .{});
+            return err;
+        }
+    };
 
     return window;
 }
