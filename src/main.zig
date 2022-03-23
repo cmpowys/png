@@ -1,6 +1,5 @@
 const std = @import("std");
 const win32 = @import("./win32_wrapper.zig");
-const deflate = @import("./deflate.zig");
 
 var running = true;
 var graphicsBuffer: GraphicsBuffer = undefined;
