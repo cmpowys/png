@@ -50,13 +50,15 @@ const HuffNode = struct {
         result.value = -1;
         return result;
     }
+
+    // TODO put the other huffnode related methods in here like getnextcode etc.addHuffNode
 };
 
 const max_code_length_table_length = 19;
 const max_lit_length_table_length = 286;
 const max_dist_length_table_length = 32;
 
-fn getDeflateHeader(bits: *BitStream) !DeflateHeader {
+fn getDeflateHeader(bits: *BitStream) !DeflateHeader { // TODO could just make the DeflateHeader a packed struct and cast it to the first two bytes of the byte stream
     var compressionMethod = try getNextBitsWithError(bits, 4, "Compression Method");
     var log2WindowSize = try getNextBitsWithError(bits, 4, "Log 2 Window Size");
     var fCheck = try getNextBitsWithError(bits, 5, "fCheck");
@@ -177,6 +179,7 @@ fn getEncodedHuffCodes(bits: *BitStream, arena: *std.heap.ArenaAllocator, huffTr
     std.debug.assert(numCodesExpected > 0);
 
     var codes = try std.ArrayList(u32).initCapacity(arena.allocator(), numCodesExpected);
+    var prevCode : u32 = 0;
 
     while (codes.items.len < numCodesExpected) {
         var code: u32 = try getNextCode(huffTree, bits);
@@ -185,7 +188,7 @@ fn getEncodedHuffCodes(bits: *BitStream, arena: *std.heap.ArenaAllocator, huffTr
         if (code > 15) {
             switch (code) {
                 16 => {
-                    code = codes.items[codes.items.len - 1];
+                    code = prevCode;
                     repeats = (try getNextBitsWithError(bits, 2, "HuffMan Repeats")) + 3;
                 },
                 17 => {
@@ -203,6 +206,7 @@ fn getEncodedHuffCodes(bits: *BitStream, arena: *std.heap.ArenaAllocator, huffTr
             }
         }
         try codes.appendNTimes(code, repeats);
+        prevCode = code;
     }
 
     if (codes.items.len > numCodesExpected) {
