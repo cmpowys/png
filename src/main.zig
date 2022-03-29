@@ -1,12 +1,31 @@
 const std = @import("std");
 const win32 = @import("./win32_wrapper.zig");
+const png = @import("./png.zig");
 
 var running = true;
 var graphicsBuffer: GraphicsBuffer = undefined;
 var window: win32.HWND = undefined;
 
+const PngViewerError = error{InvalidUsage};
+
 pub fn main() !void {
     const allocator = std.heap.page_allocator;
+
+    // var argIterator = try std.process.ArgIterator.initWithAllocator(allocator);
+    // defer argIterator.deinit();
+
+    // var pngFileName = argIterator.next() orelse {
+    //     return PngViewerError.InvalidUsage;
+    // };
+
+    var pngFileName = "D:\\code\\game\\data\\heart.png";
+
+    var pngStream = try readPngFile(allocator, pngFileName);
+    defer allocator.free(pngStream);
+
+    var image = try png.Image.initFromPngFile(allocator, pngStream);
+    defer image.deinit();
+
     const instance = try win32.getCurrentInstance();
     window = try win32.createWindow(600, 600, "Test Window", windowsProcedure, instance);
 
@@ -25,6 +44,13 @@ pub fn main() !void {
             win32.dispatchMessage(&msg);
         }
     }
+}
+
+fn readPngFile(allocator: std.mem.Allocator, filePath: [:0]const u8) ![]u8 {
+    const maxBytes = 1024 * 1024 * 10;
+    var file = try std.fs.cwd().openFile(filePath, .{});
+    defer file.close();
+    return try file.readToEndAlloc(allocator, maxBytes);
 }
 
 fn updateWindow() !void {
