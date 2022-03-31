@@ -1,78 +1,120 @@
 const std = @import("std");
 
-pub const Stream = struct {
-    bytes: []u8, // TODO maybe have this be a generic byte stream
+fn getBytesFromSlice(stream: *[]u8, buffer: []u8) usize {
+    const bytesToCopy = @minimum(buffer.len, stream.len);
 
-    pub fn init(bytes: []u8) Stream {
-        return Stream{ .bytes = bytes };
+    if (bytesToCopy == 0) {
+        return 0;
     }
 
-    pub fn getNBytes(self: *Stream, n: usize) ?[]u8 {
-        if (self.bytes.len < n) {
-            return null;
+    for (stream.*[0..bytesToCopy]) |b, i| {
+        buffer[i] = b;
+    }
+
+    stream.* = stream.*[bytesToCopy..];
+    return bytesToCopy;
+}
+
+pub fn Stream(comptime Bytes: type) type {
+    return struct {
+        bytes: Bytes,
+        currentByte: ?u8,
+        bitPosition: u8,
+
+        pub fn init(bytes: Bytes) Stream(Bytes) {
+            return Stream(Bytes){ .bytes = bytes, .currentByte = null, .bitPosition = 0 };
         }
 
-        const result = self.bytes[0..n];
-        self.bytes = self.bytes[n..];
-        return result;
-    }
-
-    pub fn get(self: *Stream, comptime T: type) ?T {
-        if (self.bytes.len < @sizeOf(T)) {
-            return null;
+        pub fn get(self: *Stream(Bytes), comptime T: type) ?T {
+            switch (@typeInfo(T)) {
+                .Struct => {
+                    return self.getStruct(T);
+                },
+                .Int => {
+                    return self.getInt(T);
+                },
+                .Enum => {
+                    return self.getEnum(T);
+                },
+                else => {
+                    unreachable;
+                },
+            }
         }
 
-        return self.getUnchecked(T);
-    }
+        pub fn getNBits(self: *Stream(Bytes), numBits: u32) ?u64 {
+            // TODO make performant
+            // TODO need to err if you try to get bytes whilst in the "middle" of a byte
+            var result: u64 = 0;
+            var bitNumber: u64 = 0;
+            const one: u64 = 1;
 
-    fn getUnchecked(self: *Stream, comptime T: type) T {
-        var result: T = undefined;
-        switch (@typeInfo(T)) {
-            .Struct => {
-                result = self.getStruct(T);
-            },
-            .Int => {
-                result = self.getInt(T);
-            },
-            .Enum => {
-                result = self.getEnum(T);
-            },
-            else => {
-                unreachable;
-            },
-        }
+            if (self.currentByte == null) {
+                self.currentByte = self.get(u8) orelse return null;
+                self.bitPosition = 0;
+            }
 
-        self.bytes = self.bytes[@sizeOf(T)..];
-        return result;
-    }
+            while (bitNumber < numBits) : (bitNumber += 1) {
+                const byte = self.currentByte orelse return null;
 
-    fn getStruct(self: *Stream, comptime S: type) S {
-        if (@typeInfo(S) != .Struct) @compileError("unexpected type, wanted Struct");
+                const nextBit: u8 = if ((byte & (one << @intCast(u6, self.bitPosition))) != 0) 1 else 0;
+                self.bitPosition += 1;
 
-        var result: S = undefined;
-        var resultPtr = &result;
+                result |= (nextBit << @intCast(u3, bitNumber));
 
-        inline for (std.meta.fields(S)) |f| {
-            @field(resultPtr, f.name) = self.getUnchecked(f.field_type);
-        }
+                if (self.bitPosition == 8) {
+                    self.currentByte = self.get(u8);
+                    self.bitPosition = 0;
+                }
+            }
 
-        return result;
-    }
-
-    fn getInt(self: *Stream, comptime I: type) I {
-        if (@typeInfo(I) != .Int) @compileError("unexpected type, wanted Int");
-        const result = std.mem.bytesToValue(I, self.bytes[0..@sizeOf(I)]);
-
-        if (@import("builtin").target.cpu.arch.endian() == .Little) {
-            return @byteSwap(I, result);
-        } else {
             return result;
         }
-    }
 
-    fn getEnum(self: *Stream, comptime E: type) E {
-        if (@typeInfo(E) != .Enum) @compileError("unexpected type wanted Enum");
-        const tagTypeValue = self.getUnchecked(@typeInfo(E).Enum.tag_type);
-        return @intToEnum(E, tagTypeValue); // TODO check that tag type value can be converted to enum E
-    }
-};
+        fn getBytes(self: *Stream(Bytes), buffer: []u8) ?void {
+            var bytesReturned: usize = undefined;
+            if (Bytes == []u8) {
+                bytesReturned = getBytesFromSlice(&self.bytes, buffer);
+            } else {
+                bytesReturned = self.bytes.getBytes(buffer);
+            }
+
+            if (bytesReturned != buffer.len) {
+                return null;
+            }
+        }
+
+        fn getStruct(self: *Stream(Bytes), comptime S: type) ?S {
+            if (@typeInfo(S) != .Struct) @compileError("unexpected type, wanted Struct");
+
+            var result: S = undefined;
+            var resultPtr = &result;
+
+            inline for (std.meta.fields(S)) |f| {
+                @field(resultPtr, f.name) = self.get(f.field_type) orelse return null;
+            }
+
+            return result;
+        }
+
+        fn getInt(self: *Stream(Bytes), comptime I: type) ?I {
+            if (@typeInfo(I) != .Int) @compileError("unexpected type, wanted Int");
+
+            var intBuffer: [@sizeOf(I)]u8 = undefined;
+            self.getBytes(intBuffer[0..@sizeOf(I)]) orelse return null;
+            const result = std.mem.bytesToValue(I, intBuffer[0..@sizeOf(I)]);
+
+            if (@import("builtin").target.cpu.arch.endian() == .Little) {
+                return @byteSwap(I, result);
+            } else {
+                return result;
+            }
+        }
+
+        fn getEnum(self: *Stream(Bytes), comptime E: type) ?E {
+            if (@typeInfo(E) != .Enum) @compileError("unexpected type wanted Enum");
+            const tagTypeValue = self.get(@typeInfo(E).Enum.tag_type) orelse return null;
+            return @intToEnum(E, tagTypeValue); // TODO check that tag type value can be converted to enum E
+        }
+    };
+}

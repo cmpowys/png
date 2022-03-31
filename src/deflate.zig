@@ -1,14 +1,14 @@
 const std = @import("std");
+const byte_stream = @import("./byte_stream.zig");
 const Allocator = std.mem.Allocator;
 
 pub const DeflateError = error{ InvalidStream, UnSupported, UnExpected };
 
-pub fn decompress(allocator: *Allocator, bytes: []u8) ![]u8 {
+pub fn decompress(allocator: *Allocator, bytes: anytype) ![]u8 {
     var arena = std.heap.ArenaAllocator.init(allocator.*);
     defer arena.deinit();
 
-    var bits = BitStream.new(bytes);
-    const header = try getDeflateHeader(&bits);
+    const header = try getDeflateHeader(bytes);
 
     if (header.compressionMethod != 8) {
         std.log.err("Compression method = {}, expected 8", .{header.compressionMethod});
@@ -25,7 +25,7 @@ pub fn decompress(allocator: *Allocator, bytes: []u8) ![]u8 {
     var output = std.ArrayList(u8).init(allocator.*);
     errdefer output.clearAndFree();
 
-    while (try processBlock(&bits, &output, &arena)) {}
+    while (try processBlock(bytes, &output, &arena)) {}
 
     return output.toOwnedSlice();
 }
@@ -58,7 +58,7 @@ const max_code_length_table_length = 19;
 const max_lit_length_table_length = 286;
 const max_dist_length_table_length = 32;
 
-fn getDeflateHeader(bits: *BitStream) !DeflateHeader { // TODO could just make the DeflateHeader a packed struct and cast it to the first two bytes of the byte stream
+fn getDeflateHeader(bits: anytype) !DeflateHeader { // TODO could just make the DeflateHeader a packed struct and cast it to the first two bytes of the byte stream
     var compressionMethod = try getNextBitsWithError(bits, 4, "Compression Method");
     var log2WindowSize = try getNextBitsWithError(bits, 4, "Log 2 Window Size");
     var fCheck = try getNextBitsWithError(bits, 5, "fCheck");
@@ -68,13 +68,13 @@ fn getDeflateHeader(bits: *BitStream) !DeflateHeader { // TODO could just make t
     return DeflateHeader{ .compressionMethod = @intCast(u8, compressionMethod), .log2WindowSize = @intCast(u8, log2WindowSize), .fCheck = @intCast(u8, fCheck), .fDict = @intCast(u8, fDict), .fLevel = @intCast(u8, fLevel) };
 }
 
-fn getBlockHeader(bits: *BitStream) !BlockHeader {
+fn getBlockHeader(bits: anytype) !BlockHeader {
     var isFinal = try getNextBitsWithError(bits, 1, "IsFinalBlock");
     var blockType = try getNextBitsWithError(bits, 2, "BlockType");
     return BlockHeader{ .isFinal = isFinal == 1, .blockType = @intToEnum(BlockType, blockType) };
 }
 
-fn processBlock(bits: *BitStream, output: *std.ArrayList(u8), arena: *std.heap.ArenaAllocator) !bool {
+fn processBlock(bits: anytype, output: *std.ArrayList(u8), arena: *std.heap.ArenaAllocator) !bool {
     _ = output;
     const blockHeader = try getBlockHeader(bits);
 
@@ -94,7 +94,7 @@ fn processBlock(bits: *BitStream, output: *std.ArrayList(u8), arena: *std.heap.A
     return !blockHeader.isFinal;
 }
 
-fn decompressRestOfBlock(bits: *BitStream, output: *std.ArrayList(u8), huffTrees: HuffTrees) !void {
+fn decompressRestOfBlock(bits: anytype, output: *std.ArrayList(u8), huffTrees: HuffTrees) !void {
 
     // TODO simplify table with a 2d array
     const baseLengthsForDistanceCodes = [_]u16{ 3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 15, 17, 19, 23, 27, 31, 35, 43, 51, 59, 67, 83, 99, 115, 131, 163, 195, 227, 258 };
@@ -137,7 +137,7 @@ fn decompressRestOfBlock(bits: *BitStream, output: *std.ArrayList(u8), huffTrees
     }
 }
 
-fn getDynamicHuffTrees(arena: *std.heap.ArenaAllocator, bits: *BitStream) !HuffTrees {
+fn getDynamicHuffTrees(arena: *std.heap.ArenaAllocator, bits: anytype) !HuffTrees {
     const numberOfLiteralLengthCodes = (try getNextBitsWithError(bits, 5, "Number Of Literal Length Codes")) + 257;
     const numberOfDistanceCodes = (try getNextBitsWithError(bits, 5, "Number Of Distance Codes")) + 1;
     const numberOfCodeLengthCodes = (try getNextBitsWithError(bits, 4, "Number Of Code Length Codes")) + 4;
@@ -157,7 +157,7 @@ fn getDynamicHuffTrees(arena: *std.heap.ArenaAllocator, bits: *BitStream) !HuffT
     };
 }
 
-fn getCodeLengthCodes(arena: *std.heap.ArenaAllocator, bits: *BitStream, numberOfCodeLengthCodes: usize) ![]u32 {
+fn getCodeLengthCodes(arena: *std.heap.ArenaAllocator, bits: anytype, numberOfCodeLengthCodes: usize) ![]u32 {
     const codeLengthTableOrdering = [_]usize{ 16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15 };
 
     var codeLengthEncoding = try arena.allocator().alloc(u32, max_code_length_table_length);
@@ -175,11 +175,11 @@ fn getCodeLengthCodes(arena: *std.heap.ArenaAllocator, bits: *BitStream, numberO
     return codeLengthEncoding;
 }
 
-fn getEncodedHuffCodes(bits: *BitStream, arena: *std.heap.ArenaAllocator, huffTree: *HuffNode, numCodesExpected: usize) ![]u32 {
+fn getEncodedHuffCodes(bits: anytype, arena: *std.heap.ArenaAllocator, huffTree: *HuffNode, numCodesExpected: usize) ![]u32 {
     std.debug.assert(numCodesExpected > 0);
 
     var codes = try std.ArrayList(u32).initCapacity(arena.allocator(), numCodesExpected);
-    var prevCode : u32 = 0;
+    var prevCode: u32 = 0;
 
     while (codes.items.len < numCodesExpected) {
         var code: u32 = try getNextCode(huffTree, bits);
@@ -313,7 +313,7 @@ fn getCodeCounts(arena: *std.heap.ArenaAllocator, codes: []u32) !CodeCounts {
     return CodeCounts{ .codeCount = codeCount, .nextCode = nextCode, .maxCodeLength = maxCodeLength };
 }
 
-fn getNextCode(huffTree: *HuffNode, bits: *BitStream) !u16 {
+fn getNextCode(huffTree: *HuffNode, bits: anytype) !u16 {
     var root = huffTree;
     while (true) {
         if (root.value >= 0) {
@@ -383,52 +383,12 @@ fn addHuffNode(huffTree: *HuffNode, arena: *std.heap.ArenaAllocator, codeLength:
     root.value = value;
 }
 
-fn getNextBitsWithError(bits: *BitStream, numBits: u32, fieldName: []const u8) !u64 {
+fn getNextBitsWithError(bits: anytype, numBits: u32, fieldName: []const u8) !u64 {
     return bits.getNBits(numBits) orelse {
         std.log.err("Invalid deflate header, not enough bits for '{s}'", .{fieldName});
         return DeflateError.InvalidStream;
     };
 }
-
-const BitStream = struct {
-    bytes: []u8,
-    bitPosition: u8,
-
-    fn new(bytes: []u8) BitStream {
-        return BitStream{
-            .bytes = bytes,
-            .bitPosition = 0,
-        };
-    }
-
-    fn getNBits(self: *BitStream, numBits: u32) ?u64 {
-        const numBitsRemaining = (self.bytes.len << 3) + (8 - self.bitPosition);
-        if (numBitsRemaining < numBits) {
-            return null;
-        }
-
-        var result: u64 = 0;
-
-        // TODO make performant
-        var bitNumber: u64 = 0;
-        const one: u64 = 1;
-
-        while (bitNumber < numBits) : (bitNumber += 1) {
-            const byte = self.bytes[0];
-            const nextBit: u8 = if ((byte & (one << @intCast(u6, self.bitPosition))) != 0) 1 else 0;
-            self.bitPosition += 1;
-
-            result |= (nextBit << @intCast(u3, bitNumber));
-
-            if (self.bitPosition == 8) {
-                self.bytes = self.bytes[1..];
-                self.bitPosition = 0;
-            }
-        }
-
-        return result;
-    }
-};
 
 test "simple deflate stream" {
     try runTestCase();
@@ -445,13 +405,13 @@ fn runTestCase() !void {
 
     const expectedString = [_]u8{ 'A', 'B', 'C', 'D', 'E', 'A', 'B', 'C', 'D', ' ', 'A', 'B', 'C', 'D', 'E', 'A', 'B', 'C', 'D' };
 
-    var inputStream = testData[0..];
+    var inputStream = byte_stream.Stream([]u8).init(testData[0..]);
 
     var allocator = std.testing.allocator;
 
-    var outputStream = try decompress(&allocator, inputStream);
+    var outputStream = try decompress(&allocator, &inputStream);
     defer allocator.free(outputStream);
 
     try std.testing.expect(outputStream.len == expectedString.len);
-    try std.testing.expectEqualSlices(u8, outputStream, expectedString[0..]);  
+    try std.testing.expectEqualSlices(u8, outputStream, expectedString[0..]);
 }

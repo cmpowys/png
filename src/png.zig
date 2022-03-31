@@ -1,5 +1,6 @@
 const std = @import("std");
 const byte_stream = @import("./byte_stream.zig");
+const deflate = @import("./deflate.zig");
 
 pub const PngError = error{ UnExpected, InvalidFormat, UnSupported };
 
@@ -36,7 +37,6 @@ const ChunkType = enum(u32) {
     Time = 0x74494d45,
 };
 
-
 const ChunkHeader = packed struct {
     length: u32,
     type: ChunkType,
@@ -45,6 +45,7 @@ const ChunkHeader = packed struct {
 const HeaderChunk = packed struct {
     width: u32,
     height: u32,
+    //TODO these below can all be enums
     bitDepth: u8,
     colourType: u8,
     compressionMethod: u8,
@@ -56,7 +57,7 @@ const PngContext = struct {
     bytes: []u8,
     allocator: std.mem.Allocator,
     arenaAllocator: std.mem.Allocator, // Memory is assumed to be freed in bulk after image is decoded
-    stream: byte_stream.Stream,
+    stream: byte_stream.Stream([]u8),
     dataChunks: std.ArrayList([]u8),
     headerChunk: ?HeaderChunk,
 };
@@ -67,7 +68,7 @@ fn decodePng(allocator: std.mem.Allocator, bytes: []u8) !Image {
 
     var context = PngContext{
         .bytes = bytes,
-        .stream = byte_stream.Stream.init(bytes),
+        .stream = byte_stream.Stream([]u8).init(bytes),
         .dataChunks = std.ArrayList([]u8).init(arenaAllocator.allocator()),
         .allocator = allocator,
         .arenaAllocator = arenaAllocator.allocator(),
@@ -95,7 +96,7 @@ fn decodePng(allocator: std.mem.Allocator, bytes: []u8) !Image {
                 const headerChunk = context.stream.get(HeaderChunk) orelse return PngError.InvalidFormat;
 
                 if (headerChunk.bitDepth != 8) {
-                    std.log.err("Unsupported bith depth {}, requires 8", .{headerChunk.bitDepth});
+                    std.log.err("Unsupported bit depth {}, requires 8", .{headerChunk.bitDepth});
                     return PngError.UnSupported;
                 }
 
@@ -105,9 +106,14 @@ fn decodePng(allocator: std.mem.Allocator, bytes: []u8) !Image {
             },
             .IDat => {
                 if (context.headerChunk == null) {
-                    std.log.warn("Encountered data chunk before data chunk in PNG stream", .{});
+                    std.log.warn("Encountered data chunk before header chunk in PNG stream", .{});
                 }
-                var data = context.stream.getNBytes(chunkHeader.length) orelse return PngError.InvalidFormat;
+                if (context.stream.bytes.len < chunkHeader.length) {
+                    return PngError.InvalidFormat;
+                }
+
+                var data = context.stream.bytes[0..chunkHeader.length];
+                context.stream.bytes = context.stream.bytes[chunkHeader.length..];
                 try context.dataChunks.append(data);
             },
             .IEnd => {
@@ -121,5 +127,46 @@ fn decodePng(allocator: std.mem.Allocator, bytes: []u8) !Image {
         _ = crc; // TODO use CRC to check data integrity
     }
 
+    var deflateStream = byte_stream.Stream(ArrayOfByteSlices).init(ArrayOfByteSlices.init(context.dataChunks));
+    _ = try deflate.decompress(&context.allocator, &deflateStream);
     return undefined;
 }
+
+const ArrayOfByteSlices = struct {
+    bytes: std.ArrayList([]u8),
+    arrayIndex: usize,
+    sliceIndex: usize,
+
+    pub fn init(bytes: std.ArrayList([]u8)) ArrayOfByteSlices {
+        return ArrayOfByteSlices{
+            .bytes = bytes,
+            .arrayIndex = 0,
+            .sliceIndex = 0,
+        };
+    }
+
+    pub fn getBytes(self: *ArrayOfByteSlices, buffer: []u8) usize {
+
+        var bytesCopied: usize = 0;
+        while (bytesCopied < buffer.len and self.arrayIndex < self.bytes.items.len) {
+            const bytesLeftToCopy = buffer.len - bytesCopied;
+            const currentSlice = &self.bytes.items[self.arrayIndex];
+            const bytesLeftInSlice = currentSlice.len - self.sliceIndex;
+            const bytesToCopyFromCurrentSlice = @minimum(bytesLeftToCopy, bytesLeftInSlice);
+
+            for(currentSlice.*[self.sliceIndex..self.sliceIndex + bytesToCopyFromCurrentSlice]) |b| {
+                buffer[bytesCopied] = b;
+                bytesCopied += 1;
+            }
+            
+            if (bytesToCopyFromCurrentSlice == bytesLeftInSlice){
+                self.sliceIndex = 0;
+                self.arrayIndex += 1;
+            } else {
+                currentSlice.* = currentSlice.*[self.sliceIndex + bytesToCopyFromCurrentSlice..];
+            }
+        }
+
+        return bytesCopied;
+    }
+};
