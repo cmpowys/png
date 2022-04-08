@@ -4,7 +4,7 @@ const Allocator = std.mem.Allocator;
 
 pub const DeflateError = error{ InvalidStream, UnSupported, UnExpected };
 
-pub fn decompress(allocator: *Allocator, bytes: anytype) ![]u8 {
+pub fn decompress(allocator: *Allocator, bytes: anytype) ![]u8 { // TODO make output a stream?
     var arena = std.heap.ArenaAllocator.init(allocator.*);
     defer arena.deinit();
 

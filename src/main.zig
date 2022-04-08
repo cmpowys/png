@@ -27,11 +27,13 @@ pub fn main() !void {
     defer image.deinit();
 
     const instance = try win32.getCurrentInstance();
-    window = try win32.createWindow(600, 600, "Test Window", windowsProcedure, instance);
+    window = try win32.createWindow(@intCast(u16, image.width), @intCast(u16, image.height), "Test Window", windowsProcedure, instance);
 
-    graphicsBuffer = try generateGraphicsBuffer(&allocator, 600, 600);
-    @memset(graphicsBuffer.buffer.ptr, 0xA2, graphicsBuffer.width * graphicsBuffer.height * 4);
+    graphicsBuffer = try generateGraphicsBuffer(&allocator, image.width, image.height);
+    @memset(graphicsBuffer.buffer.ptr, 0xFF, graphicsBuffer.width * graphicsBuffer.height * 4);
     defer allocator.free(graphicsBuffer.buffer);
+
+    renderImageToBuffer(image, graphicsBuffer);
 
     try updateWindow();
 
@@ -42,6 +44,47 @@ pub fn main() !void {
         while (win32.peekMessage(&msg)) {
             win32.translateMessage(&msg);
             win32.dispatchMessage(&msg);
+        }
+    }
+}
+
+// TODO have to deal with endianess?
+fn renderImageToBuffer(image: png.Image, buffer: GraphicsBuffer) void {
+    const bytesPerPixel = 4;
+    var y: isize = image.height - 1;
+    while (y >= 0) : (y -= 1) {
+        var x: isize = 0;
+        while (x < image.width) : (x += 1) {
+            const textureIndex = @intCast(usize, (y * image.width) + x);
+            const bufferIndex = @intCast(usize, ((image.height - y - 1) * image.width) + x);
+            const imageColour = image.rgba[textureIndex];
+
+            var a = (imageColour & 0xff000000) >> 24;
+            var b = (imageColour & 0x00ff0000) >> 16;
+            var g = (imageColour & 0x0000ff00) >> 8;
+            var r = imageColour & 0x000000ff;
+
+            const bufferR = buffer.buffer[bufferIndex * bytesPerPixel];
+            const bufferG = buffer.buffer[bufferIndex * bytesPerPixel + 1];
+            const bufferB = buffer.buffer[bufferIndex * bytesPerPixel + 2];
+
+            const alpha: f32 = @intToFloat(f32, a) / 255.0;
+            const oneMinusAlpha = 1 - alpha;
+
+            if (alpha == 0.0) {
+                r = bufferR;
+                g = bufferG;
+                b = bufferB;
+            } else if (alpha != 1.0) {
+                r = @floatToInt(u32, std.math.floor((@intToFloat(f32, r) * alpha) + (@intToFloat(f32, bufferR) * oneMinusAlpha)));
+                g = @floatToInt(u32, std.math.floor((@intToFloat(f32, g) * alpha) + (@intToFloat(f32, bufferG) * oneMinusAlpha)));
+                b = @floatToInt(u32, std.math.floor((@intToFloat(f32, b) * alpha) + (@intToFloat(f32, bufferB) * oneMinusAlpha)));
+            }
+
+            buffer.buffer[bufferIndex * bytesPerPixel] = @intCast(u8, b % 255);
+            buffer.buffer[bufferIndex * bytesPerPixel + 1] = @intCast(u8, g % 255);
+            buffer.buffer[bufferIndex * bytesPerPixel + 2] = @intCast(u8, r % 255);
+            buffer.buffer[bufferIndex * bytesPerPixel + 3] = 0;
         }
     }
 }
