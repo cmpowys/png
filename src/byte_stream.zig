@@ -75,7 +75,7 @@ pub fn Stream(comptime Bytes: type) type {
             }
 
             if (Bytes == []u8) {
-                const numBytes = @alignOf(I)*count;
+                const numBytes = (@bitSizeOf(I)/8) * count;
                 if (self.bytes.len < numBytes) {
                     return null;
                 }

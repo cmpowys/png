@@ -117,8 +117,7 @@ pub fn resizeWindowExactly(window: HWND, desiredWidth: u16, desiredHeight: u16) 
 
     const finalClientArea = try getClientDimensions(window);
     if ((finalClientArea.width != desiredWidth) or (finalClientArea.height != desiredHeight)) {
-        std.log.err("Unable to resize exactly to ({},{}) got ({},{}) instead.", .{ desiredWidth, desiredHeight, finalClientArea.width, finalClientArea.height });
-        return WindowsError.Win32Error;
+        std.log.warn("Unable to resize exactly to ({},{}) got ({},{}) instead.", .{ desiredWidth, desiredHeight, finalClientArea.width, finalClientArea.height });
     }
 }
 

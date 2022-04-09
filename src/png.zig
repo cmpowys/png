@@ -57,6 +57,52 @@ const HeaderChunk = packed struct {
     interlaceMethod: u8,
 };
 
+const PalletEntry = struct {
+    r: u8,
+    g: u8,
+    b: u8,
+    a: u8,
+
+    fn new() PalletEntry {
+        return PalletEntry{
+            .r = 0,
+            .g = 0,
+            .b = 0,
+            .a = 255,
+        };
+    }
+
+    fn insertFromBytes(self: *PalletEntry, colour: u24) void {
+        self.r = @intCast(u8, colour & 0xff0000 >> 16);
+        self.g = @intCast(u8, colour & 0x00ff00 >> 8);
+        self.b = @intCast(u8, colour & 0x0000ff);
+    }
+};
+
+const max_pallet_size = 256;
+
+const PalletInformation = struct {
+    entries: [max_pallet_size]PalletEntry,
+    palletSize: u32,
+    transparencySize: u32,
+    palletUsesAlpha: bool,
+
+    fn new() PalletInformation {
+        var info = PalletInformation{
+            .palletSize = 0,
+            .transparencySize = 0,
+            .palletUsesAlpha = false,
+            .entries = undefined,
+        };
+
+        for (info.entries) |*entry| {
+            entry.* = PalletEntry.new();
+        }
+
+        return info;
+    }
+};
+
 const PngContext = struct {
     bytes: []u8,
     allocator: std.mem.Allocator,
@@ -64,6 +110,7 @@ const PngContext = struct {
     stream: byte_stream.Stream([]u8),
     dataChunks: std.ArrayList([]u8),
     headerChunk: ?HeaderChunk,
+    palletInformation: PalletInformation,
 };
 
 fn decodePng(allocator: std.mem.Allocator, bytes: []u8) !Image {
@@ -77,6 +124,7 @@ fn decodePng(allocator: std.mem.Allocator, bytes: []u8) !Image {
         .allocator = allocator,
         .arenaAllocator = arenaAllocator.allocator(),
         .headerChunk = null,
+        .palletInformation = PalletInformation.new(),
     };
 
     var headerBytes = context.stream.get(u64) orelse return PngError.InvalidFormat;
@@ -130,6 +178,28 @@ fn decodePng(allocator: std.mem.Allocator, bytes: []u8) !Image {
                 }
                 stillProcessing = false;
             },
+            .Plte => {
+                const palletSizeInBytes = chunkHeader.length;
+                if (palletSizeInBytes % 3 != 0) {
+                    std.log.err("In PNG pallet chunk: got {} pallet size not divisible by 3", .{palletSizeInBytes});
+                    return PngError.InvalidFormat;
+                }
+
+                context.palletInformation.palletSize = palletSizeInBytes / 3;
+                const palletEntries = context.stream.getBytesAsConstSlice(u24, context.palletInformation.palletSize) orelse unreachable;
+                for (palletEntries) |entryAsU24, i| {
+                    context.palletInformation.entries[i].insertFromBytes(entryAsU24);
+                }
+            },
+            .Trns => {
+                context.palletInformation.transparencySize = chunkHeader.length;
+                const alphaBytes = context.stream.getBytesAsConstSlice(u8, chunkHeader.length) orelse return PngError.InvalidFormat;
+                var index: usize = 0;
+                while (index < context.palletInformation.transparencySize) : (index += 1) {
+                    context.palletInformation.entries[index].a = alphaBytes[index];
+                }
+                context.palletInformation.palletUsesAlpha = true;
+            },
             else => {
                 std.log.warn("Unsupported PNG chunk type, {}, skipping ...", .{chunkHeader.type});
                 context.stream.bytes = context.stream.bytes[chunkHeader.length..];
@@ -166,40 +236,70 @@ fn unfilter(context: *PngContext, stream: *byte_stream.Stream([]u8)) !Image {
         .allocator = context.allocator,
     };
 
-    // TODO performance
+    // TODO performance and cleanup/refactor
     const numScanLines = height;
     var scanLineIndex: usize = 0;
-    const scanLineSize = width;
     var prevRow: []u8 = undefined;
+    const usesPalletData = header.colourType == 3; // TODO use enum
+    const usesDefaultAlpha = (header.colourType == 2) or (header.colourType == 3 and !context.palletInformation.palletUsesAlpha);
 
     while (scanLineIndex < numScanLines) : (scanLineIndex += 1) {
         const filterMethod = stream.get(FilterMethod) orelse return PngError.InvalidFormat;
-        const scanLine = stream.getBytesAsConstSlice(u8, scanLineSize * 4) orelse return PngError.UnExpected;
         const imageRow = std.mem.sliceAsBytes(image.rgba[(scanLineIndex * width)..((scanLineIndex + 1) * width)]);
+        var colourPosition: usize = 0;
 
-        for (imageRow) |*outputByte, byteIndex| {
-            var toAdd: u8 = 0;
-            const prevByte = if (byteIndex < 4) 0 else imageRow[byteIndex - 4];
-            const upByte = if (scanLineIndex == 0) 0 else prevRow[byteIndex];
-            switch (filterMethod) {
-                .None => {},
-                .Up => {
-                    toAdd = upByte;
-                },
-                .Left => {
-                    toAdd = prevByte;
-                },
-                .Average => {
-                    toAdd = @intCast(u8, (((@intCast(u16, prevByte) + @intCast(u16, upByte)) >> 1) % 256));
-                },
-                .Paeth => {
-                    const aboveLeft : u8 = if (scanLineIndex == 0 or byteIndex < 4) 0 else prevRow[(byteIndex - 4)];
-                    toAdd = paethPredictor(prevByte, upByte, aboveLeft);
-                },
+        while (colourPosition < width) : (colourPosition += 1) {
+            var palletEntry: PalletEntry = undefined;
+
+            if (usesPalletData) {
+                const palletEntryIndex = stream.get(u8) orelse return PngError.InvalidFormat;
+                palletEntry = context.palletInformation.entries[palletEntryIndex];
             }
-            const currentByteInScanline = scanLine[byteIndex];
-            const byteToInsert = currentByteInScanline +% toAdd;
-            outputByte.* = @intCast(u8, byteToInsert);
+
+            var bytePosition: usize = 0;
+            while (bytePosition < 4) : (bytePosition += 1) {
+                var toAdd: u8 = 0;
+                const byteIndex = (colourPosition * 4) + bytePosition;
+                const prevByte = if (byteIndex < 4) 0 else imageRow[byteIndex - 4];
+                const upByte = if (scanLineIndex == 0) 0 else prevRow[byteIndex];
+
+                if (usesDefaultAlpha and bytePosition == 3) {
+                    imageRow[byteIndex] = 255;
+                } else {
+                    switch (filterMethod) {
+                        .None => {},
+                        .Up => {
+                            toAdd = upByte;
+                        },
+                        .Left => {
+                            toAdd = prevByte;
+                        },
+                        .Average => {
+                            toAdd = @intCast(u8, (((@intCast(u16, prevByte) + @intCast(u16, upByte)) >> 1) % 256));
+                        },
+                        .Paeth => {
+                            const aboveLeft: u8 = if (scanLineIndex == 0 or byteIndex < 4) 0 else prevRow[(byteIndex - 4)];
+                            toAdd = paethPredictor(prevByte, upByte, aboveLeft);
+                        },
+                    }
+
+                    var filteredByte : u8 = undefined;
+                    if (usesPalletData) {
+                        filteredByte = switch (bytePosition) {
+                            0 => palletEntry.r,
+                            1 => palletEntry.g,
+                            2 => palletEntry.b,
+                            3 => palletEntry.a,
+                            else => unreachable,
+                        };
+                    } else {
+                        filteredByte = stream.get(u8) orelse return PngError.InvalidFormat;
+                    }
+
+                    const byteToInsert = filteredByte +% toAdd;
+                    imageRow[byteIndex] = @intCast(u8, byteToInsert);
+                }
+            }
         }
 
         prevRow = imageRow;
@@ -210,9 +310,9 @@ fn unfilter(context: *PngContext, stream: *byte_stream.Stream([]u8)) !Image {
 
 fn paethPredictor(left: u8, up: u8, aboveLeft: u8) u8 {
     const p: i64 = @intCast(i64, left) + @intCast(i64, up) - @intCast(i64, aboveLeft);
-    const pa: u64 = std.math.absCast( p - @intCast(i64, left));
-    const pb: u64 = std.math.absCast( p - @intCast(i64, up));
-    const pc: u64 = std.math.absCast( p - @intCast(i64, aboveLeft));
+    const pa: u64 = std.math.absCast(p - @intCast(i64, left));
+    const pb: u64 = std.math.absCast(p - @intCast(i64, up));
+    const pc: u64 = std.math.absCast(p - @intCast(i64, aboveLeft));
 
     return if (pa <= pb and pa <= pc) left else if (pb <= pc) up else aboveLeft;
 }
