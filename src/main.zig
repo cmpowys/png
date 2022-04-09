@@ -19,7 +19,8 @@ pub fn main() !void {
     // };
 
     //var pngFileName = "D:\\code\\game\\data\\heart.png";
-    var pngFileName = "D:\\code\\game\\data\\diamond.png";
+    //var pngFileName = "D:\\code\\game\\data\\diamond.png";
+    var pngFileName = "D:\\code\\game\\data\\shoppinghumans.png";
 
     var pngStream = try readPngFile(allocator, pngFileName);
     defer allocator.free(pngStream);

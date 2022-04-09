@@ -80,7 +80,10 @@ fn processBlock(bits: anytype, output: *std.ArrayList(u8), arena: *std.heap.Aren
 
     switch (blockHeader.blockType) {
         BlockType.UnCompressed => {},
-        BlockType.Fixed => {},
+        BlockType.Fixed => {
+            const huffTrees = try getFixedHuffTrees(arena);
+            try decompressRestOfBlock(bits, output, huffTrees);
+        },
         BlockType.Dynamic => {
             const huffTrees = try getDynamicHuffTrees(arena, bits);
             try decompressRestOfBlock(bits, output, huffTrees);
@@ -218,11 +221,11 @@ fn getEncodedHuffCodes(bits: anytype, arena: *std.heap.ArenaAllocator, huffTree:
 }
 
 fn getFixedHuffTrees(arena: *std.heap.ArenaAllocator) !HuffTrees {
-    const huffTrees: HuffTrees = undefined;
-    comptime {
-        var encodedLitCodes: [max_lit_length_table_length]u32 = undefined;
-        var encodedDistCodes: [max_dist_length_table_length]u32 = undefined;
+    var huffTrees: HuffTrees = undefined;
+    comptime var encodedLitCodes: [max_lit_length_table_length]u32 = undefined;
+    comptime var encodedDistCodes: [max_dist_length_table_length]u32 = undefined;
 
+    comptime {
         for (encodedLitCodes[0..144]) |*val| {
             val.* = 8;
         }
@@ -235,17 +238,19 @@ fn getFixedHuffTrees(arena: *std.heap.ArenaAllocator) !HuffTrees {
             val.* = 7;
         }
 
-        for (encodedLitCodes[280..288]) |*val| {
+        for (encodedLitCodes[280..]) |*val| {
             val.* = 8;
         }
 
         for (encodedDistCodes[0..]) |*val| {
             val.* = 5;
         }
-
-        huffTrees.litCodes = try generateHuffmanTree(arena, encodedLitCodes[0..]);
-        huffTrees.distCodes = try generateHuffmanTree(arena, encodedDistCodes[0..]);
     }
+
+    // TODO need a comptime allocator so this can all be done in comptime
+    huffTrees.litCodes = try generateHuffmanTree(arena, encodedLitCodes[0..]);
+    huffTrees.distCodes = try generateHuffmanTree(arena, encodedDistCodes[0..]);
+
     return huffTrees;
 }
 
