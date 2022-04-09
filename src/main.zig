@@ -81,9 +81,10 @@ fn renderImageToBuffer(image: png.Image, buffer: GraphicsBuffer) void {
                 b = @floatToInt(u32, std.math.floor((@intToFloat(f32, b) * alpha) + (@intToFloat(f32, bufferB) * oneMinusAlpha)));
             }
 
-            buffer.buffer[bufferIndex * bytesPerPixel] = @intCast(u8, b % 255);
-            buffer.buffer[bufferIndex * bytesPerPixel + 1] = @intCast(u8, g % 255);
-            buffer.buffer[bufferIndex * bytesPerPixel + 2] = @intCast(u8, r % 255);
+            // TODO endianess?
+            buffer.buffer[bufferIndex * bytesPerPixel + 0] = @intCast(u8, b % 256);
+            buffer.buffer[bufferIndex * bytesPerPixel + 1] = @intCast(u8, g % 256);
+            buffer.buffer[bufferIndex * bytesPerPixel + 2] = @intCast(u8, r % 256);
             buffer.buffer[bufferIndex * bytesPerPixel + 3] = 0;
         }
     }
