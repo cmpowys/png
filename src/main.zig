@@ -18,7 +18,8 @@ pub fn main() !void {
     //     return PngViewerError.InvalidUsage;
     // };
 
-    var pngFileName = "D:\\code\\game\\data\\heart.png";
+    //var pngFileName = "D:\\code\\game\\data\\heart.png";
+    var pngFileName = "D:\\code\\game\\data\\diamond.png";
 
     var pngStream = try readPngFile(allocator, pngFileName);
     defer allocator.free(pngStream);

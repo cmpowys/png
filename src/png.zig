@@ -35,6 +35,8 @@ const ChunkType = enum(u32) {
     Phys = 0x70485973,
     Chrm = 0x6348524D,
     Time = 0x74494d45,
+    ToBeDetermined1 = 0x63614E76,
+    ToBeDetermined2 = 0x624B4744,
 };
 
 const FilterMethod = enum(u8) { None = 0, Left = 1, Up = 2, Average = 3, Paeth = 4 };
@@ -130,6 +132,7 @@ fn decodePng(allocator: std.mem.Allocator, bytes: []u8) !Image {
             },
             else => {
                 std.log.warn("Unsupported PNG chunk type, {}, skipping ...", .{chunkHeader.type});
+                context.stream.bytes = context.stream.bytes[chunkHeader.length..];
             },
         }
         var crc = context.stream.get(u32) orelse return PngError.InvalidFormat;
@@ -187,7 +190,7 @@ fn unfilter(context: *PngContext, stream: *byte_stream.Stream([]u8)) !Image {
                     toAdd = prevByte;
                 },
                 .Average => {
-                    toAdd = ((prevByte + upByte) >> 1);
+                    toAdd = @intCast(u8, (((@intCast(u16, prevByte) + @intCast(u16, upByte)) >> 1) % 256));
                 },
                 .Paeth => {
                     const aboveLeft : u8 = if (scanLineIndex == 0 or byteIndex < 4) 0 else prevRow[(byteIndex - 4)];
