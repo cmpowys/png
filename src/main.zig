@@ -11,18 +11,22 @@ const PngViewerError = error{InvalidUsage};
 pub fn main() !void {
     const allocator = std.heap.page_allocator;
 
-    // var argIterator = try std.process.ArgIterator.initWithAllocator(allocator);
-    // defer argIterator.deinit();
+    var argIterator = try std.process.ArgIterator.initWithAllocator(allocator);
+    defer argIterator.deinit();
 
-    // var pngFileName = argIterator.next() orelse {
-    //     return PngViewerError.InvalidUsage;
-    // };
+    if (!argIterator.skip()) {
+        return PngViewerError.InvalidUsage;
+    }
+
+    var pngFileName = argIterator.next() orelse {
+        return PngViewerError.InvalidUsage;
+    };
 
     //var pngFileName = "D:\\code\\game\\data\\heart.png";
     //var pngFileName = "D:\\code\\game\\data\\diamond.png";
     //var pngFileName = "D:\\code\\game\\data\\shoppinghumans.png";
     //var pngFileName = "D:\\code\\game\\data\\lion.png";
-    var pngFileName = "D:\\code\\game\\data\\letter.png";
+    //var pngFileName = "D:\\code\\game\\data\\letter.png";
 
     var pngStream = try readPngFile(allocator, pngFileName);
     defer allocator.free(pngStream);
