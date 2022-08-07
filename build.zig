@@ -16,6 +16,7 @@ pub fn build(b: *std.build.Builder) void {
     exe.setBuildMode(mode);
 
     exe.addPackagePath("win32", "lib/zigwin32/win32.zig");
+    exe.addPackagePath("deflate", "lib/deflate/src/deflate.zig");
 
     exe.install();
 

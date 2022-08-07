@@ -1,6 +1,6 @@
 const std = @import("std");
 const byte_stream = @import("./byte_stream.zig");
-const deflate = @import("./deflate.zig");
+const deflate = @import("deflate");
 
 pub const PngError = error{ UnExpected, InvalidFormat, UnSupported };
 
@@ -209,9 +209,19 @@ fn decodePng(allocator: std.mem.Allocator, bytes: []u8) !Image {
         _ = crc; // TODO use CRC to check data integrity
     }
 
-    var deflateStream = byte_stream.Stream(ArrayOfByteSlices).init(ArrayOfByteSlices.init(context.dataChunks));
-    var deflateOutput = try deflate.decompress(&context.allocator, &deflateStream);
+    var deflateInput = try mergeDataChunks(allocator, context.dataChunks);
+    defer allocator.free(deflateInput);
+    var deflateOutput = try deflate.decompress(&context.allocator, deflateInput);
     return unfilter(&context, &byte_stream.Stream([]u8).init(deflateOutput));
+}
+
+fn mergeDataChunks(allocator : std.mem.Allocator, chunks : std.ArrayList([]u8)) ![]u8 {
+    var merged = std.ArrayList(u8).init(allocator);
+    errdefer merged.deinit();
+    for(chunks.items) |chunk| {
+        try merged.appendSlice(chunk);
+    }
+    return merged.toOwnedSlice();
 }
 
 fn unfilter(context: *PngContext, stream: *byte_stream.Stream([]u8)) !Image {

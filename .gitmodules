@@ -1,3 +1,6 @@
 [submodule "lib/zigwin32"]
 	path = lib/zigwin32
 	url = https://github.com/marlersoft/zigwin32
+[submodule "lib/deflate"]
+	path = lib/deflate
+	url = https://github.com/cmpowys/deflate.git
