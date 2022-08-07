@@ -3,11 +3,9 @@ const std = @import("std");
 pub fn Stream(comptime Bytes: type) type {
     return struct {
         bytes: Bytes,
-        currentByte: ?u8,
-        bitPosition: u8,
 
         pub fn init(bytes: Bytes) Stream(Bytes) {
-            return Stream(Bytes){ .bytes = bytes, .currentByte = null, .bitPosition = 0 };
+            return Stream(Bytes){ .bytes = bytes };
         }
 
         pub fn get(self: *Stream(Bytes), comptime T: type) ?T {
@@ -25,35 +23,6 @@ pub fn Stream(comptime Bytes: type) type {
                     unreachable;
                 },
             }
-        }
-
-        pub fn getNBits(self: *Stream(Bytes), numBits: u32) ?u64 {
-            // TODO make performant
-            // TODO need to err if you try to get bytes whilst in the "middle" of a byte
-            var result: u64 = 0;
-            var bitNumber: u64 = 0;
-            const one: u64 = 1;
-
-            if (self.currentByte == null) {
-                self.currentByte = self.get(u8) orelse return null;
-                self.bitPosition = 0;
-            }
-
-            while (bitNumber < numBits) : (bitNumber += 1) {
-                const byte = self.currentByte orelse return null;
-
-                const nextBit: u16 = if ((byte & (one << @intCast(u6, self.bitPosition))) != 0) 1 else 0;
-                self.bitPosition += 1;
-
-                result |= (nextBit << @intCast(u4, bitNumber));
-
-                if (self.bitPosition == 8) {
-                    self.currentByte = self.get(u8);
-                    self.bitPosition = 0;
-                }
-            }
-
-            return result;
         }
 
         pub fn getBytes(self: *Stream(Bytes), buffer: []u8) ?void {
